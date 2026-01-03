@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Revolution\Laravel\Boost;
 
+use Illuminate\Contracts\Filesystem\FileNotFoundException;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use JsonException;
 use Laravel\Boost\Contracts\Agent;
 use Laravel\Boost\Contracts\McpClient;
 use Laravel\Boost\Install\CodeEnvironment\CodeEnvironment;
@@ -30,9 +32,14 @@ class CopilotCli extends CodeEnvironment implements Agent, McpClient
      */
     public function systemDetectionConfig(Platform $platform): array
     {
-        return [
-            'command' => 'command -v copilot',
-        ];
+        return match ($platform) {
+            Platform::Darwin, Platform::Linux => [
+                'command' => 'command -v copilot',
+            ],
+            Platform::Windows => [
+                'command' => 'where copilot 2>nul',
+            ],
+        };
     }
 
     /**
@@ -43,7 +50,8 @@ class CopilotCli extends CodeEnvironment implements Agent, McpClient
     public function projectDetectionConfig(): array
     {
         return [
-            'files' => ['.github/copilot-instructions.md'],
+            'paths' => ['.github/instructions'],
+            'files' => ['.github/copilot-instructions.md', '.github/instructions/laravel-boost.instructions.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md'],
         ];
     }
 
@@ -91,6 +99,9 @@ class CopilotCli extends CodeEnvironment implements Agent, McpClient
      *
      * @param  array<int, string>  $args
      * @param  array<string, string>  $env
+     *
+     * @throws FileNotFoundException
+     * @throws JsonException
      */
     protected function installFileMcp(string $key, string $command, array $args = [], array $env = []): bool
     {
@@ -104,7 +115,7 @@ class CopilotCli extends CodeEnvironment implements Agent, McpClient
         $config = [];
         if (File::exists($path)) {
             $existingContent = File::get($path);
-            $config = json_decode($existingContent, true) ?? [];
+            $config = json_decode($existingContent, true, 512, JSON_THROW_ON_ERROR) ?? [];
         }
 
         $phpPath = $this->convertCommandToPhpPath($command);
@@ -128,7 +139,7 @@ class CopilotCli extends CodeEnvironment implements Agent, McpClient
 
         // Remove empty arrays from existing config to avoid compatibility issues
         $config = $this->removeEmptyArrays($config);
-        $json = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        $json = json_encode($config, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json) {
             $json = str_replace("\r\n", "\n", $json);
 
